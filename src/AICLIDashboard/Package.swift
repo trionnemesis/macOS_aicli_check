@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "AICLIDashboard",
     platforms: [
-        .macOS(.v14) // Sonoma, required for M3
+        .macOS(.v13) // Ventura, supports M3+
     ],
     products: [
         .executable(name: "AICLIDashboard", targets: ["AICLIDashboard"])

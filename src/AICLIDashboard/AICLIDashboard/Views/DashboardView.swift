@@ -1,8 +1,14 @@
 import SwiftUI
 
-/// The main dashboard view with a glassmorphism (translucent) design.
+/// The main dashboard view with glassmorphism design and hover opacity.
 struct DashboardView: View {
     @StateObject private var viewModel = DashboardViewModel()
+    @State private var isHovering = false
+    @AppStorage("windowOpacity") private var windowOpacity: Double = 0.85
+    
+    var currentOpacity: Double {
+        isHovering ? min(windowOpacity + 0.10, 0.95) : windowOpacity
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -51,18 +57,33 @@ struct DashboardView: View {
             
             Spacer()
             
-            // Footer
-            Text("Updated: \(viewModel.lastUpdated, style: .time)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            // Footer with error status
+            HStack {
+                if let error = viewModel.lastError {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Text("Updated: \(viewModel.lastUpdated, style: .time)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
         }
         .padding()
-        .frame(width: 280, height: 360)
+        .frame(width: 280, height: 380)
         .background(
-            // Glassmorphism effect
             RoundedRectangle(cornerRadius: 16)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+                .fill(.ultraThinMaterial.opacity(currentOpacity))
+                .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 5)
         )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isHovering = hovering
+            }
+        }
     }
 }

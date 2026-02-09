@@ -7,12 +7,13 @@ enum MCPService {
     static let knownServers = ["chrome-devtools", "context7", "playwright"]
     
     /// Fetches the connection status for all known MCP servers.
-    /// This checks for running processes or local socket/port availability.
-    static func fetchAllConnections() -> [MCPConnection] {
-        return knownServers.map { serverName in
-            let status = checkServerStatus(name: serverName)
-            return MCPConnection(serverName: serverName, status: status)
-        }
+    static func fetchAllConnections() async -> [MCPConnection] {
+        return await Task.detached(priority: .userInitiated) {
+            knownServers.map { serverName in
+                let status = checkServerStatus(name: serverName)
+                return MCPConnection(serverName: serverName, status: status)
+            }
+        }.value
     }
     
     /// Checks if a specific MCP server is running.
@@ -23,16 +24,26 @@ enum MCPService {
             return .connected
         }
         
-        // Strategy 2: For known ports (if any), check port availability
-        // This is a placeholder - real MCP servers may have specific ports
-        // Strategy 3: Check MCP config file for active servers
-        if let mcpConfig = ShellService.run("cat ~/.config/mcp/servers.json 2>/dev/null"),
-           mcpConfig.contains(name) {
-            // Config exists, but process isn't running
-            return .disconnected
+        // Strategy 2: Check common MCP config locations
+        let configPaths = [
+            "~/.config/mcp/servers.json",
+            "~/.mcp/config.json",
+            "~/.claude/mcp.json"
+        ]
+        
+        for path in configPaths {
+            let expandedPath = NSString(string: path).expandingTildeInPath
+            if let config = ShellService.run("cat '\(expandedPath)' 2>/dev/null"),
+               config.contains(name) {
+                // Config exists for this server, but check if actually running
+                if let lsof = ShellService.run("lsof -i -P 2>/dev/null | grep -i '\(name)'"),
+                   !lsof.isEmpty {
+                    return .connected
+                }
+                return .disconnected
+            }
         }
         
-        // Unknown or not configured
         return .disconnected
     }
 }

@@ -1,21 +1,31 @@
 import Foundation
 
-/// Service to fetch usage data from the supported AI CLI tools.
+/// Service to fetch usage data from the supported AI CLI tools with retry logic.
 enum AICLIService {
+    
+    private static let maxRetries = 3
+    private static var cache: [String: (data: ToolUsage, timestamp: Date)] = [:]
+    private static let cacheValiditySeconds: TimeInterval = 5
     
     // MARK: - Gemini CLI
     
-    /// Parses the output of `gemini /status` command.
-    static func fetchGeminiStatus() -> ToolUsage {
-        guard let output = ShellService.run("gemini /status 2>/dev/null") else {
-            return ToolUsage(toolName: "Gemini CLI", status: "Not Installed", usageValue: "—", metric: "Status")
+    /// Fetches Gemini CLI status with retry logic.
+    static func fetchGeminiStatus() async -> ToolUsage {
+        return await fetchWithRetry(cacheKey: "gemini") {
+            parseGeminiOutput(ShellService.run("gemini /status 2>/dev/null"))
+        }
+    }
+    
+    private static func parseGeminiOutput(_ output: String?) -> ToolUsage {
+        guard let output = output, !output.isEmpty else {
+            return ToolUsage(toolName: "Gemini CLI", status: "未連線", usageValue: "—", metric: "Status")
         }
         
-        if output.lowercased().contains("error") || output.isEmpty {
-            return ToolUsage(toolName: "Gemini CLI", status: "Error", usageValue: output.isEmpty ? "No Response" : String(output.prefix(40)), metric: "Status")
+        if output.lowercased().contains("error") {
+            LoggingService.shared.log("Gemini CLI error: \(output)", level: .warning)
+            return ToolUsage(toolName: "Gemini CLI", status: "Error", usageValue: String(output.prefix(40)), metric: "Status")
         }
         
-        // Try to extract token usage (example format: "Tokens: 12,500")
         if let match = extractFirst(pattern: "Tokens?:?\\s*([\\d,]+)", from: output) {
             return ToolUsage(toolName: "Gemini CLI", status: "OK", usageValue: match, metric: "Tokens")
         }
@@ -25,14 +35,21 @@ enum AICLIService {
     
     // MARK: - Codex CLI
     
-    /// Parses the output of `codex /status` command.
-    static func fetchCodexStatus() -> ToolUsage {
-        guard let output = ShellService.run("codex /status 2>/dev/null") else {
-            return ToolUsage(toolName: "Codex CLI", status: "Not Installed", usageValue: "—", metric: "Status")
+    /// Fetches Codex CLI status with retry logic.
+    static func fetchCodexStatus() async -> ToolUsage {
+        return await fetchWithRetry(cacheKey: "codex") {
+            parseCodexOutput(ShellService.run("codex /status 2>/dev/null"))
+        }
+    }
+    
+    private static func parseCodexOutput(_ output: String?) -> ToolUsage {
+        guard let output = output, !output.isEmpty else {
+            return ToolUsage(toolName: "Codex CLI", status: "未連線", usageValue: "—", metric: "Status")
         }
         
-        if output.lowercased().contains("error") || output.isEmpty {
-            return ToolUsage(toolName: "Codex CLI", status: "Error", usageValue: output.isEmpty ? "No Response" : String(output.prefix(40)), metric: "Status")
+        if output.lowercased().contains("error") {
+            LoggingService.shared.log("Codex CLI error: \(output)", level: .warning)
+            return ToolUsage(toolName: "Codex CLI", status: "Error", usageValue: String(output.prefix(40)), metric: "Status")
         }
         
         if let match = extractFirst(pattern: "Requests?:?\\s*([\\d,]+)", from: output) {
@@ -44,22 +61,27 @@ enum AICLIService {
     
     // MARK: - Claude Code
     
-    /// Parses the output of `claude /usage` command.
-    static func fetchClaudeUsage() -> ToolUsage {
-        guard let output = ShellService.run("claude /usage 2>/dev/null") else {
-            return ToolUsage(toolName: "Claude Code", status: "Not Installed", usageValue: "—", metric: "Usage")
+    /// Fetches Claude Code usage with retry logic.
+    static func fetchClaudeUsage() async -> ToolUsage {
+        return await fetchWithRetry(cacheKey: "claude") {
+            parseClaudeOutput(ShellService.run("claude /usage 2>/dev/null"))
+        }
+    }
+    
+    private static func parseClaudeOutput(_ output: String?) -> ToolUsage {
+        guard let output = output, !output.isEmpty else {
+            return ToolUsage(toolName: "Claude Code", status: "未連線", usageValue: "—", metric: "Usage")
         }
         
-        if output.lowercased().contains("error") || output.isEmpty {
-            return ToolUsage(toolName: "Claude Code", status: "Error", usageValue: output.isEmpty ? "No Response" : String(output.prefix(40)), metric: "Usage")
+        if output.lowercased().contains("error") {
+            LoggingService.shared.log("Claude Code error: \(output)", level: .warning)
+            return ToolUsage(toolName: "Claude Code", status: "Error", usageValue: String(output.prefix(40)), metric: "Usage")
         }
         
-        // Try to extract cost (example format: "Cost: $1.23")
         if let match = extractFirst(pattern: "\\$[\\d,.]+", from: output) {
             return ToolUsage(toolName: "Claude Code", status: "OK", usageValue: match, metric: "Cost")
         }
         
-        // Try to extract tokens
         if let match = extractFirst(pattern: "([\\d,]+)\\s*tokens?", from: output) {
             return ToolUsage(toolName: "Claude Code", status: "OK", usageValue: match + " tokens", metric: "Tokens")
         }
@@ -67,18 +89,41 @@ enum AICLIService {
         return ToolUsage(toolName: "Claude Code", status: "OK", usageValue: String(output.prefix(50)), metric: "Usage")
     }
     
-    /// Fetches all CLI tool statuses.
-    static func fetchAll() -> [ToolUsage] {
-        return [
-            fetchGeminiStatus(),
-            fetchCodexStatus(),
-            fetchClaudeUsage()
-        ]
+    // MARK: - Retry Logic
+    
+    private static func fetchWithRetry(cacheKey: String, fetch: @escaping () -> ToolUsage) async -> ToolUsage {
+        // Check cache first
+        if let cached = cache[cacheKey],
+           Date().timeIntervalSince(cached.timestamp) < cacheValiditySeconds {
+            return cached.data
+        }
+        
+        var lastResult: ToolUsage?
+        
+        for attempt in 1...maxRetries {
+            let result = await Task.detached(priority: .userInitiated) {
+                fetch()
+            }.value
+            
+            if result.status != "Error" && result.status != "未連線" && result.status != "連線中斷" {
+                cache[cacheKey] = (data: result, timestamp: Date())
+                return result
+            }
+            
+            lastResult = result
+            
+            if attempt < maxRetries {
+                LoggingService.shared.log("Retry \(attempt)/\(maxRetries) for \(cacheKey)", level: .info)
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay
+            }
+        }
+        
+        LoggingService.shared.log("All retries failed for \(cacheKey)", level: .error)
+        return lastResult ?? ToolUsage(toolName: cacheKey, status: "連線中斷", usageValue: "—", metric: "Status")
     }
     
     // MARK: - Helpers
     
-    /// Extracts the first match (or first capture group) from a regex pattern.
     private static func extractFirst(pattern: String, from text: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return nil
@@ -88,7 +133,6 @@ enum AICLIService {
             return nil
         }
         
-        // If there's a capture group, return it; otherwise return the full match
         let captureRange = match.numberOfRanges > 1 ? match.range(at: 1) : match.range
         guard let swiftRange = Range(captureRange, in: text) else {
             return nil
