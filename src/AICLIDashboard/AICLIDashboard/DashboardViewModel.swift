@@ -10,7 +10,7 @@ class DashboardViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     
     private var refreshTimer: AnyCancellable?
-    let refreshInterval: TimeInterval = 30 // seconds
+    let refreshInterval: TimeInterval = 60 // seconds (increased to 60s to reduce power usage)
     
     init() {
         startAutoRefresh()

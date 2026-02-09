@@ -35,6 +35,20 @@ enum AICLIService {
             return ToolUsage(toolName: "Codex CLI", status: "Error", usageValue: output.isEmpty ? "No Response" : String(output.prefix(40)), metric: "Status")
         }
         
+        // Try to extract multi-line limit info (e.g., "5h limit" and "Weekly limit")
+        var details = [String]()
+        if let h5Match = extractFirst(pattern: "5h limit:.*?(\\d+%)", from: output) {
+            details.append("5h: \(h5Match)")
+        }
+        if let weeklyMatch = extractFirst(pattern: "Weekly limit:.*?(\\d+%)", from: output) {
+            details.append("Wkly: \(weeklyMatch)")
+        }
+
+        if !details.isEmpty {
+            return ToolUsage(toolName: "Codex CLI", status: "OK", usageValue: details.joined(separator: " | "), metric: "Limits Left")
+        }
+
+        // Fallback to requests count
         if let match = extractFirst(pattern: "Requests?:?\\s*([\\d,]+)", from: output) {
             return ToolUsage(toolName: "Codex CLI", status: "OK", usageValue: match, metric: "Requests")
         }
