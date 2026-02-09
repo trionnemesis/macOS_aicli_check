@@ -1,0 +1,28 @@
+Table ToolUsage {
+  id int [pk]
+  tool_name string [note: 'gemini', 'codex', 'claude']
+  metric_type string [note: 'tokens', 'cost', 'requests']
+  value float
+  unit string
+  updated_at datetime
+  Note: "Stores usage statistics for supported CLI tools"
+}
+
+Table MCPConnection {
+  id int [pk]
+  server_name string
+  status string [note: 'connected', 'connecting', 'disconnected', 'error']
+  is_active bool
+  last_heartbeat datetime
+  Note: "Tracks the connection state of MCP servers"
+}
+
+Table AppConfig {
+  id int [pk]
+  window_opacity float [note: "Transparency level (0.1 - 1.0)"]
+  theme string [note: 'light', 'dark', 'auto']
+  refresh_interval_seconds int
+  position_x int
+  position_y int
+  Note: "Application configuration and window state"
+}

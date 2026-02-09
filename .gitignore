@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Swift / Xcode
+.build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+~*
+
+# Other
+.gemini/
+.agent/
+brain/
