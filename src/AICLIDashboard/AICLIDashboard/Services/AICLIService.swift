@@ -37,11 +37,15 @@ enum AICLIService {
         
         // Try to extract multi-line limit info (e.g., "5h limit" and "Weekly limit")
         var details = [String]()
-        if let h5Match = extractFirst(pattern: "5h limit:.*?(\\d+%)", from: output) {
-            details.append("5h: \(h5Match)")
-        }
-        if let weeklyMatch = extractFirst(pattern: "Weekly limit:.*?(\\d+%)", from: output) {
-            details.append("Wkly: \(weeklyMatch)")
+        let lines = output.components(separatedBy: .newlines)
+
+        for line in lines {
+            if let h5Match = extractFirst(pattern: "5h limit:.*?(\\d+%.*?)(?=\\s{2}|│|$)", from: line) {
+                details.append("5h: \(h5Match)")
+            }
+            if let weeklyMatch = extractFirst(pattern: "Weekly limit:.*?(\\d+%.*?)(?=\\s{2}|│|$)", from: line) {
+                details.append("Wkly: \(weeklyMatch)")
+            }
         }
 
         if !details.isEmpty {

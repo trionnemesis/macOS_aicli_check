@@ -29,9 +29,13 @@ enum ShellService {
                 for line in output.components(separatedBy: .newlines) {
                     let parts = line.split(separator: "=", maxSplits: 1)
                     if parts.count == 2 {
-                        let key = String(parts[0])
+                        let key = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
                         let value = String(parts[1])
-                        env[key] = value
+
+                        // Only add if the key doesn't contain internal whitespace
+                        if !key.isEmpty && !key.contains(where: { $0.isWhitespace }) {
+                            env[key] = value
+                        }
                     }
                 }
             }
