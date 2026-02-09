@@ -52,11 +52,44 @@ enum AICLIService {
             return ToolUsage(toolName: "Codex CLI", status: "Error", usageValue: String(output.prefix(40)), metric: "Status")
         }
         
-        if let match = extractFirst(pattern: "Requests?:?\\s*([\\d,]+)", from: output) {
-            return ToolUsage(toolName: "Codex CLI", status: "OK", usageValue: match, metric: "Requests")
+        var limits: [LimitMetric] = []
+        
+        // Pattern for "5h limit: [###] 86% left (resets 01:32)"
+        let limitPattern = "([\\d\\w\\s]+limit):\\s*\\[[^\\]]*\\]\\s*(\\d+)%\\s*left\\s*\\(resets\\s+([\\d:]+)\\)"
+        
+        if let regex = try? NSRegularExpression(pattern: limitPattern, options: []) {
+            let range = NSRange(output.startIndex..., in: output)
+            let matches = regex.matches(in: output, options: [], range: range)
+            
+            for match in matches {
+                if match.numberOfRanges == 4,
+                   let nameRange = Range(match.range(at: 1), in: output),
+                   let percentRange = Range(match.range(at: 2), in: output),
+                   let resetRange = Range(match.range(at: 3), in: output) {
+                    
+                    let name = String(output[nameRange]).trimmingCharacters(in: .whitespaces)
+                    let percent = Double(output[percentRange]) ?? 0
+                    let reset = String(output[resetRange])
+                    
+                    limits.append(LimitMetric(
+                        name: name,
+                        value: percent / 100.0,
+                        detail: "\(Int(percent))% left (resets \(reset))"
+                    ))
+                }
+            }
         }
         
-        return ToolUsage(toolName: "Codex CLI", status: "OK", usageValue: String(output.prefix(50)), metric: "Status")
+        // Fallback or summary value
+        let summaryValue = limits.first?.detail ?? "Connected"
+        
+        return ToolUsage(
+            toolName: "Codex CLI",
+            status: "OK",
+            usageValue: summaryValue,
+            metric: "Limits",
+            limits: limits
+        )
     }
     
     // MARK: - Claude Code

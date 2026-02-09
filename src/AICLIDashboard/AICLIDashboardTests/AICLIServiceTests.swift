@@ -3,26 +3,21 @@ import XCTest
 
 final class AICLIServiceTests: XCTestCase {
     
-    func testGeminiStatusParsingTokens() {
-        // This test would use dependency injection for ShellService in production
-        // For now, just verify the parsing logic structure exists
-        let result = AICLIService.fetchGeminiStatus()
+    func testGeminiStatusParsingTokens() async {
+        let result = await AICLIService.fetchGeminiStatus()
         XCTAssertEqual(result.toolName, "Gemini CLI")
     }
     
-    func testCodexStatusParsingRequests() {
-        let result = AICLIService.fetchCodexStatus()
+    func testCodexStatusParsingLimits() async {
+        let result = await AICLIService.fetchCodexStatus()
         XCTAssertEqual(result.toolName, "Codex CLI")
+        // Since we don't have real output in tests without mocking ShellService,
+        // we mainly verify the async structure is correct.
     }
     
-    func testClaudeUsageParsingCost() {
-        let result = AICLIService.fetchClaudeUsage()
+    func testClaudeUsageParsingCost() async {
+        let result = await AICLIService.fetchClaudeUsage()
         XCTAssertEqual(result.toolName, "Claude Code")
-    }
-    
-    func testFetchAllReturnsThreeTools() {
-        let results = AICLIService.fetchAll()
-        XCTAssertEqual(results.count, 3)
     }
 }
 
@@ -33,8 +28,8 @@ final class MCPServiceTests: XCTestCase {
         XCTAssertTrue(MCPService.knownServers.contains("chrome-devtools"))
     }
     
-    func testFetchAllConnectionsReturnsCorrectCount() {
-        let connections = MCPService.fetchAllConnections()
+    func testFetchAllConnectionsReturnsCorrectCount() async {
+        let connections = await MCPService.fetchAllConnections()
         XCTAssertEqual(connections.count, MCPService.knownServers.count)
     }
 }

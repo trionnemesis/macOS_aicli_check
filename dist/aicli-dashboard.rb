@@ -1,6 +1,6 @@
 cask "aicli-dashboard" do
-  version "2.0.0"
-  sha256 "d56de7aa3792bf65c2fb2c2678e8cb7a4cf244b03ff176f6425b5077b61b2773"
+  version "2.1.0"
+  sha256 "d320ba5452632b7c056afd881f2970d25897f81d32c7331baa25ffccd5f438bc"
 
   url "https://github.com/trionnemesis/macOS_aicli_check/releases/download/v#{version}/AICLIDashboard-v#{version}.zip",
       verified: "github.com/trionnemesis/macOS_aicli_check/"
