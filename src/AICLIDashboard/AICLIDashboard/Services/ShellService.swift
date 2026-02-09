@@ -17,13 +17,19 @@ enum ShellService {
         
         do {
             try process.run()
+
+            // Read data safely (blocks until EOF, preventing buffer full deadlock)
+            let data = try pipe.fileHandleForReading.readToEnd()
+
             process.waitUntilExit()
+
+            if let data = data {
+                return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return ""
         } catch {
             print("ShellService Error: \(error.localizedDescription)")
             return nil
         }
-        
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
