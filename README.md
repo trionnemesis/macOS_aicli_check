@@ -1,12 +1,19 @@
-# macOS AI CLI Dashboard (v2.0.0)
+# macOS AI CLI Dashboard
+
+Native macOS desktop dashboard for monitoring AI CLI usage (gemini / codex / claude) and MCP server status at a glance.
 
 ![macOS](https://img.shields.io/badge/macOS-13.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
-![Version](https://img.shields.io/badge/version-2.0.0-green)
+![Release](https://img.shields.io/github/v/release/trionnemesis/macOS_aicli_check)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 一個 macOS 原生桌面儀表板，用於即時監控和顯示多個 AI CLI 工具的使用狀態。
 
+<!-- TODO: screenshot pending real macOS GUI session -->
+
 ## 🌟 主要功能
+
+<!-- TODO: menu bar screenshot pending real macOS GUI session -->
 
 - 🔍 **AI CLI 監控**: 支持 `gemini`, `codex`, `claude` (Claude Code) 指令的使用量追蹤。
 - 🌐 **MCP 伺服器狀態**: 即時監控已連線的 Model Context Protocol (MCP) 伺服器且每 10 秒自動檢查。
@@ -27,7 +34,7 @@
 
 ### Homebrew (推薦)
 
-這是最簡單的安裝方式：
+這是最簡單的安裝方式，Tap 來源見 [trionnemesis/homebrew-tap](https://github.com/trionnemesis/homebrew-tap)：
 
 ```bash
 # 添加 Tap
@@ -60,4 +67,10 @@ swift build -c release
 
 ## 📝 授權與版權
 
-Copyright © 2026 warden. All rights reserved.
+本專案採用 [MIT License](LICENSE) 授權。
+
+Copyright © 2026 warden.
+
+## 🔗 Related Projects
+
+- [MacDesktopWidget](https://github.com/trionnemesis/MacDesktopWidget) — 同作者的 macOS 桌面監控工具，聚焦系統資源監控。
