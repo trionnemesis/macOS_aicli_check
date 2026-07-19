@@ -1,51 +1,50 @@
 import Foundation
 
-/// Data model representing a specific limit or metric for a CLI tool.
-struct LimitMetric: Identifiable, Codable {
-    var id = UUID()
-    let name: String      // e.g., "5h limit", "Weekly limit"
-    let value: Double     // e.g., 0.86 (for 86%)
-    let detail: String    // e.g., "86% left (resets 01:32)"
+/// A stable, vendor-defined limit metric.
+struct LimitMetric: Identifiable, Codable, Equatable, Sendable {
+    var id: String { name }
+    let name: String
+    let value: Double
+    let detail: String
 }
 
-/// Data model representing the usage statistics for a single AI CLI tool.
-struct ToolUsage: Identifiable, Codable {
-    var id = UUID()
+/// The last bounded observation for a supported AI CLI tool.
+struct ToolUsage: Identifiable, Codable, Equatable, Sendable {
+    var id: String { toolName }
     let toolName: String
-    var status: String    // e.g., "OK", "Error", "未連線"
-    var usageValue: String // Primary value (deprecated/fallback)
-    var metric: String    // Primary metric name (deprecated/fallback)
-    var limits: [LimitMetric] = []
-    
-    // Initializer to maintain compatibility with existing code
-    init(toolName: String, status: String, usageValue: String, metric: String, limits: [LimitMetric] = []) {
+    var status: String
+    var usageValue: String
+    var metric: String
+    var limits: [LimitMetric]
+    var dataSource: String
+
+    init(
+        toolName: String,
+        status: String,
+        usageValue: String,
+        metric: String,
+        limits: [LimitMetric] = [],
+        dataSource: String = "Availability probe"
+    ) {
         self.toolName = toolName
         self.status = status
         self.usageValue = usageValue
         self.metric = metric
         self.limits = limits
+        self.dataSource = dataSource
     }
 }
 
-/// Data model representing the connection status of an MCP server.
-struct MCPConnection: Identifiable, Codable {
-    var id = UUID()
+/// A conservative MCP inventory observation. "Configured" does not imply that
+/// a protocol-level health check succeeded.
+struct MCPConnection: Identifiable, Codable, Equatable, Sendable {
+    var id: String { serverName }
     let serverName: String
     var status: ConnectionStatus
-    
-    enum ConnectionStatus: String, Codable {
-        case connected = "Connected"
-        case connecting = "Connecting"
-        case disconnected = "Disconnected"
+
+    enum ConnectionStatus: String, Codable, Sendable {
+        case configured = "Configured"
+        case unavailable = "Unavailable"
         case error = "Error"
-        
-        var color: String {
-            switch self {
-            case .connected: return "green"
-            case .connecting: return "yellow"
-            case .disconnected: return "gray"
-            case .error: return "red"
-            }
-        }
     }
 }

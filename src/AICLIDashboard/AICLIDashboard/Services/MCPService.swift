@@ -1,49 +1,84 @@
 import Foundation
 
-/// Service to check MCP server connection statuses.
+/// Reads configured MCP server names without shelling out or claiming a
+/// protocol-level connection that has not been observed.
 enum MCPService {
-    
-    /// Known MCP servers to check (can be expanded or made configurable).
-    static let knownServers = ["chrome-devtools", "context7", "playwright"]
-    
-    /// Fetches the connection status for all known MCP servers.
-    static func fetchAllConnections() async -> [MCPConnection] {
-        return await Task.detached(priority: .userInitiated) {
-            knownServers.map { serverName in
-                let status = checkServerStatus(name: serverName)
-                return MCPConnection(serverName: serverName, status: status)
-            }
+    static func fetchAllConnections(configURLs: [URL]? = nil) async -> [MCPConnection] {
+        let sources = configURLs ?? defaultConfigURLs()
+        return await Task.detached(priority: .utility) {
+            configuredConnections(from: sources)
         }.value
     }
-    
-    /// Checks if a specific MCP server is running.
-    private static func checkServerStatus(name: String) -> MCPConnection.ConnectionStatus {
-        // Strategy 1: Check for process by name
-        if let processOutput = ShellService.run("pgrep -fl '\(name)' 2>/dev/null"),
-           !processOutput.isEmpty {
-            return .connected
-        }
-        
-        // Strategy 2: Check common MCP config locations
-        let configPaths = [
-            "~/.config/mcp/servers.json",
-            "~/.mcp/config.json",
-            "~/.claude/mcp.json"
-        ]
-        
-        for path in configPaths {
-            let expandedPath = NSString(string: path).expandingTildeInPath
-            if let config = ShellService.run("cat '\(expandedPath)' 2>/dev/null"),
-               config.contains(name) {
-                // Config exists for this server, but check if actually running
-                if let lsof = ShellService.run("lsof -i -P 2>/dev/null | grep -i '\(name)'"),
-                   !lsof.isEmpty {
-                    return .connected
+
+    static func configuredConnections(from configURLs: [URL]) -> [MCPConnection] {
+        var serverNames = Set<String>()
+
+        for url in configURLs where FileManager.default.fileExists(atPath: url.path) {
+            do {
+                let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                if url.pathExtension.lowercased() == "toml" {
+                    if let text = String(data: data, encoding: .utf8) {
+                        serverNames.formUnion(parseCodexTOML(text))
+                    }
+                } else {
+                    let value = try JSONSerialization.jsonObject(with: data)
+                    collectServerNames(from: value, into: &serverNames)
                 }
-                return .disconnected
+            } catch {
+                LoggingService.shared.log(
+                    "Unable to parse MCP configuration \(url.lastPathComponent): \(error.localizedDescription)",
+                    level: .warning
+                )
             }
         }
-        
-        return .disconnected
+
+        return serverNames.sorted().map {
+            MCPConnection(serverName: $0, status: .configured)
+        }
+    }
+
+    private static func defaultConfigURLs() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            home.appendingPathComponent(".config/mcp/servers.json"),
+            home.appendingPathComponent(".mcp/config.json"),
+            home.appendingPathComponent(".claude/mcp.json"),
+            home.appendingPathComponent(".claude.json"),
+            home.appendingPathComponent(".gemini/settings.json"),
+            home.appendingPathComponent(".codex/config.toml")
+        ]
+    }
+
+    private static func collectServerNames(from value: Any, into result: inout Set<String>) {
+        if let dictionary = value as? [String: Any] {
+            for (key, nestedValue) in dictionary {
+                if (key == "mcpServers" || key == "servers"),
+                   let servers = nestedValue as? [String: Any] {
+                    result.formUnion(servers.keys)
+                }
+                collectServerNames(from: nestedValue, into: &result)
+            }
+        } else if let array = value as? [Any] {
+            for nestedValue in array {
+                collectServerNames(from: nestedValue, into: &result)
+            }
+        }
+    }
+
+    private static func parseCodexTOML(_ text: String) -> Set<String> {
+        let pattern = #"(?m)^\s*\[mcp_servers\.(?:\"([^\"]+)\"|([A-Za-z0-9_.-]+))\]\s*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+
+        let range = NSRange(text.startIndex..., in: text)
+        return Set(regex.matches(in: text, range: range).compactMap { match in
+            for index in 1..<match.numberOfRanges {
+                if let swiftRange = Range(match.range(at: index), in: text) {
+                    return String(text[swiftRange])
+                }
+            }
+            return nil
+        })
     }
 }

@@ -6,8 +6,10 @@ final class LoggingService {
     static let shared = LoggingService()
     
     private let logFileURL: URL
+    private let backupLogFileURL: URL
     private let dateFormatter: DateFormatter
     private let queue = DispatchQueue(label: "com.warden.AICLIDashboard.logging")
+    private let maximumLogSize = 1_048_576
     
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -17,6 +19,7 @@ final class LoggingService {
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
         
         logFileURL = appDir.appendingPathComponent("error.log")
+        backupLogFileURL = appDir.appendingPathComponent("error.log.1")
         
         dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -31,6 +34,7 @@ final class LoggingService {
             let logLine = "[\(timestamp)] [\(level.rawValue)] \(message)\n"
             
             if let data = logLine.data(using: .utf8) {
+                self.rotateIfNeeded(incomingByteCount: data.count)
                 if FileManager.default.fileExists(atPath: self.logFileURL.path) {
                     if let handle = try? FileHandle(forWritingTo: self.logFileURL) {
                         handle.seekToEndOfFile()
@@ -42,6 +46,18 @@ final class LoggingService {
                 }
             }
         }
+    }
+
+    private func rotateIfNeeded(incomingByteCount: Int) {
+        let fileManager = FileManager.default
+        guard let attributes = try? fileManager.attributesOfItem(atPath: logFileURL.path),
+              let fileSize = attributes[.size] as? NSNumber,
+              fileSize.intValue + incomingByteCount > maximumLogSize else {
+            return
+        }
+
+        try? fileManager.removeItem(at: backupLogFileURL)
+        try? fileManager.moveItem(at: logFileURL, to: backupLogFileURL)
     }
     
     /// Logs an error with context.

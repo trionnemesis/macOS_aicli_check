@@ -1,87 +1,174 @@
-import SwiftUI
 import Combine
+import Foundation
 
-/// ViewModel that orchestrates fetching and refreshing dashboard data.
+/// Owns the dashboard's single refresh domain and visibility-aware scheduler.
 @MainActor
-class DashboardViewModel: ObservableObject {
-    @Published var toolUsages: [ToolUsage] = []
-    @Published var mcpConnections: [MCPConnection] = []
-    @Published var lastUpdated: Date = Date()
-    @Published var isLoading: Bool = false
-    @Published var lastError: String? = nil
-    
-    @AppStorage("cliRefreshInterval") private var cliRefreshInterval: Double = 30
-    @AppStorage("mcpRefreshInterval") private var mcpRefreshInterval: Double = 10
-    @AppStorage("monitorGemini") private var monitorGemini: Bool = true
-    @AppStorage("monitorCodex") private var monitorCodex: Bool = true
-    @AppStorage("monitorClaude") private var monitorClaude: Bool = true
-    
-    private var cliTimer: AnyCancellable?
-    private var mcpTimer: AnyCancellable?
-    
-    init() {
-        startTimers()
-        Task { await refresh() }
+final class DashboardViewModel: ObservableObject {
+    typealias ToolFetcher = (Bool, Bool, Bool) async -> [ToolUsage]
+    typealias MCPFetcher = () async -> [MCPConnection]
+    typealias SchedulerSleep = (TimeInterval) async throws -> Void
+
+    @Published private(set) var toolUsages: [ToolUsage] = []
+    @Published private(set) var mcpConnections: [MCPConnection] = []
+    @Published private(set) var lastUpdated: Date?
+    @Published private(set) var isLoading = false
+    @Published private(set) var lastError: String?
+
+    private let defaults: UserDefaults
+    private let toolFetcher: ToolFetcher
+    private let mcpFetcher: MCPFetcher
+    private let schedulerSleep: SchedulerSleep
+
+    private var schedulerTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
+    private var refreshPending = false
+    private var isWindowVisible = false
+    private var settingsCancellable: AnyCancellable?
+
+    init(
+        defaults: UserDefaults = .standard,
+        toolFetcher: @escaping ToolFetcher = { monitorGemini, monitorCodex, monitorClaude in
+            await AICLIService.fetchSelected(
+                monitorGemini: monitorGemini,
+                monitorCodex: monitorCodex,
+                monitorClaude: monitorClaude,
+                runner: ProcessRunner.shared,
+                locator: SystemExecutableLocator()
+            )
+        },
+        mcpFetcher: @escaping MCPFetcher = {
+            await MCPService.fetchAllConnections()
+        },
+        schedulerSleep: @escaping SchedulerSleep = { interval in
+            try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+        }
+    ) {
+        self.defaults = defaults
+        self.toolFetcher = toolFetcher
+        self.mcpFetcher = mcpFetcher
+        self.schedulerSleep = schedulerSleep
+
+        settingsCancellable = NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification, object: defaults)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.settingsDidChange()
+                }
+            }
     }
-    
-    /// Refreshes all data from CLI tools and MCP servers.
-    func refresh() async {
+
+    deinit {
+        schedulerTask?.cancel()
+        refreshTask?.cancel()
+    }
+
+    func setWindowVisible(_ visible: Bool) {
+        guard visible != isWindowVisible else { return }
+        isWindowVisible = visible
+
+        if visible {
+            requestRefresh()
+            restartScheduler()
+        } else {
+            stopBackgroundWork()
+        }
+    }
+
+    func requestRefresh() {
+        guard isWindowVisible else { return }
+
+        if refreshTask != nil {
+            refreshPending = true
+            return
+        }
+
         isLoading = true
         lastError = nil
-        
-        // Fetch CLI statuses based on user preferences
-        var tools: [ToolUsage] = []
-        
-        if monitorGemini {
-            tools.append(await AICLIService.fetchGeminiStatus())
+        let monitorGemini = defaults.object(forKey: "monitorGemini") as? Bool ?? true
+        let monitorCodex = defaults.object(forKey: "monitorCodex") as? Bool ?? true
+        let monitorClaude = defaults.object(forKey: "monitorClaude") as? Bool ?? true
+
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+
+            async let tools = toolFetcher(monitorGemini, monitorCodex, monitorClaude)
+            async let connections = mcpFetcher()
+            let values = await (tools, connections)
+
+            guard !Task.isCancelled else {
+                refreshDidFinish(cancelled: true)
+                return
+            }
+
+            if toolUsages != values.0 {
+                toolUsages = values.0
+            }
+            if mcpConnections != values.1 {
+                mcpConnections = values.1
+            }
+
+            lastUpdated = Date()
+            if values.0.contains(where: { $0.status == "Error" || $0.status == "Timed Out" }) {
+                lastError = "部分工具無法安全完成狀態檢查"
+            }
+            refreshDidFinish(cancelled: false)
         }
-        if monitorCodex {
-            tools.append(await AICLIService.fetchCodexStatus())
+    }
+
+    private var autoRefreshEnabled: Bool {
+        defaults.object(forKey: "autoRefreshEnabled") as? Bool ?? false
+    }
+
+    private var refreshInterval: TimeInterval {
+        let configured = defaults.object(forKey: "refreshInterval") as? Double ?? 120
+        return min(600, max(60, configured))
+    }
+
+    private func settingsDidChange() {
+        guard isWindowVisible else { return }
+        requestRefresh()
+        restartScheduler()
+    }
+
+    private func restartScheduler() {
+        schedulerTask?.cancel()
+        schedulerTask = nil
+
+        guard isWindowVisible, autoRefreshEnabled else { return }
+        let interval = refreshInterval
+
+        schedulerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await schedulerSleep(interval)
+                } catch {
+                    return
+                }
+
+                guard !Task.isCancelled, let self, self.isWindowVisible else { return }
+                self.requestRefresh()
+            }
         }
-        if monitorClaude {
-            tools.append(await AICLIService.fetchClaudeUsage())
-        }
-        
-        // Check for errors
-        let hasError = tools.contains { $0.status == "Error" || $0.status == "連線中斷" }
-        if hasError {
-            lastError = "部分工具無法連線"
-        }
-        
-        toolUsages = tools
-        lastUpdated = Date()
+    }
+
+    private func stopBackgroundWork() {
+        schedulerTask?.cancel()
+        schedulerTask = nil
+        refreshPending = false
+        refreshTask?.cancel()
+    }
+
+    private func refreshDidFinish(cancelled: Bool) {
+        refreshTask = nil
         isLoading = false
-    }
-    
-    /// Refreshes MCP connections only.
-    func refreshMCP() async {
-        mcpConnections = await MCPService.fetchAllConnections()
-    }
-    
-    /// Starts separate timers for CLI and MCP refresh.
-    private func startTimers() {
-        // CLI refresh timer (default 30s)
-        cliTimer = Timer.publish(every: cliRefreshInterval, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                Task { await self?.refresh() }
-            }
-        
-        // MCP refresh timer (default 10s)
-        mcpTimer = Timer.publish(every: mcpRefreshInterval, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                Task { await self?.refreshMCP() }
-            }
-        
-        // Initial MCP fetch
-        Task { await refreshMCP() }
-    }
-    
-    /// Restarts timers when intervals change.
-    func restartTimers() {
-        cliTimer?.cancel()
-        mcpTimer?.cancel()
-        startTimers()
+
+        let shouldRunPendingRefresh = refreshPending && isWindowVisible
+        refreshPending = false
+        if shouldRunPendingRefresh {
+            requestRefresh()
+        } else if cancelled {
+            lastError = nil
+        }
     }
 }

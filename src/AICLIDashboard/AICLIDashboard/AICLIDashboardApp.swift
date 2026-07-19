@@ -1,15 +1,23 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 @main
+@MainActor
 struct AICLIDashboardApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var viewModel = DashboardViewModel()
+
     var body: some Scene {
-        WindowGroup {
-            DashboardView()
+        Window("AI CLI Dashboard", id: "dashboard") {
+            DashboardView(viewModel: viewModel)
                 .background(WindowAccessor { window in
+                    appDelegate.visibilityHandler = { [weak viewModel] visible in
+                        viewModel?.setWindowVisible(visible)
+                    }
                     appDelegate.configureWindow(window)
+                    viewModel.setWindowVisible(
+                        window.isVisible && window.occlusionState.contains(.visible)
+                    )
                 })
         }
         .windowStyle(.hiddenTitleBar)
@@ -18,30 +26,30 @@ struct AICLIDashboardApp: App {
         .commands {
             CommandGroup(replacing: .appTermination) {
                 Button("Hide Window") {
-                    NSApp.hide(nil)
+                    appDelegate.hideWindow()
                 }
                 .keyboardShortcut("h", modifiers: [.command])
-                
+
                 Divider()
-                
+
                 Button("Quit AI CLI Dashboard") {
                     NSApp.terminate(nil)
                 }
                 .keyboardShortcut("q", modifiers: [.command])
             }
         }
-        
+
         Settings {
             SettingsView()
         }
     }
 }
 
-// MARK: - Window Accessor Helper
+// MARK: - Window Accessor
 
 struct WindowAccessor: NSViewRepresentable {
     let callback: (NSWindow) -> Void
-    
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
@@ -51,97 +59,135 @@ struct WindowAccessor: NSViewRepresentable {
         }
         return view
     }
-    
-    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            if let window = nsView.window {
+                callback(window)
+            }
+        }
+    }
 }
 
 // MARK: - App Delegate
 
-class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem?
-    var popover: NSPopover?
-    
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    var visibilityHandler: ((Bool) -> Void)?
+
+    private var statusItem: NSStatusItem?
+    private weak var dashboardWindow: NSWindow?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBarIcon()
-        
-        // Prevent app from terminating when window is closed
         NSApp.setActivationPolicy(.accessory)
     }
-    
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // Minimize to menu bar instead of quitting
+        false
+    }
+
+    func applicationDidHide(_ notification: Notification) {
+        visibilityHandler?(false)
+    }
+
+    func applicationDidUnhide(_ notification: Notification) {
+        notifyCurrentVisibility()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        visibilityHandler?(false)
+    }
+
+    func configureWindow(_ window: NSWindow) {
+        guard dashboardWindow !== window else { return }
+        dashboardWindow = window
+
+        window.delegate = self
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
+        window.level = .normal
+        window.collectionBehavior = []
+        window.isMovableByWindowBackground = true
+        _ = window.setFrameAutosaveName("AICLIDashboardWindow")
+    }
+
+    func hideWindow() {
+        dashboardWindow?.orderOut(nil)
+        visibilityHandler?(false)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        visibilityHandler?(false)
         return false
     }
-    
-    func configureWindow(_ window: NSWindow) {
-        // Translucent background
-        window.isOpaque = false
-        window.backgroundColor = NSColor.clear.withAlphaComponent(0.01)
-        
-        // Always on top (floating level)
-        window.level = .floating
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        
-        // Enable dragging
-        window.isMovableByWindowBackground = true
-        
-        // Restore saved position
-        if let savedFrame = UserDefaults.standard.string(forKey: "windowFrame") {
-            window.setFrame(from: savedFrame)
-        }
-        
-        // Save position when window moves
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didMoveNotification,
-            object: window,
-            queue: .main
-        ) { _ in
-            UserDefaults.standard.set(window.frameDescriptor, forKey: "windowFrame")
-        }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        visibilityHandler?(false)
     }
-    
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        notifyCurrentVisibility()
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        notifyCurrentVisibility()
+    }
+
+    private func notifyCurrentVisibility() {
+        guard let window = dashboardWindow else {
+            visibilityHandler?(false)
+            return
+        }
+        visibilityHandler?(
+            window.isVisible && window.occlusionState.contains(.visible) && !NSApp.isHidden
+        )
+    }
+
     private func setupMenuBarIcon() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        
+
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "AI CLI Dashboard")
-            button.action = #selector(toggleWindow)
-            button.target = self
+            button.image = NSImage(
+                systemSymbolName: "chart.bar.fill",
+                accessibilityDescription: "AI CLI Dashboard"
+            )
         }
-        
-        // Setup menu
+
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Show Dashboard", action: #selector(showWindow), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(
+            title: "Show Dashboard",
+            action: #selector(showWindow),
+            keyEquivalent: "s"
+        ))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(
+            title: "Settings...",
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        ))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
-        
+        menu.addItem(NSMenuItem(
+            title: "Quit",
+            action: #selector(quitApp),
+            keyEquivalent: "q"
+        ))
+        menu.items.forEach { $0.target = self }
         statusItem?.menu = menu
     }
-    
-    @objc private func toggleWindow() {
-        if let window = NSApp.windows.first(where: { $0.title != "Settings" }) {
-            if window.isVisible {
-                window.orderOut(nil)
-            } else {
-                window.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
-    }
-    
+
     @objc private func showWindow() {
-        if let window = NSApp.windows.first(where: { $0.title != "Settings" }) {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        guard let window = dashboardWindow else { return }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        notifyCurrentVisibility()
     }
-    
+
     @objc private func openSettings() {
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
-    
+
     @objc private func quitApp() {
         NSApp.terminate(nil)
     }

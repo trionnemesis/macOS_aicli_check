@@ -1,91 +1,90 @@
-import SwiftUI
 import ServiceManagement
+import SwiftUI
 
-/// Settings view for customizing dashboard behavior.
+/// Settings use conservative defaults: one interval, opt-in polling, and no
+/// transparent/floating rendering mode.
 struct SettingsView: View {
-    @AppStorage("windowOpacity") private var windowOpacity: Double = 0.85
-    @AppStorage("cliRefreshInterval") private var cliRefreshInterval: Double = 30
-    @AppStorage("mcpRefreshInterval") private var mcpRefreshInterval: Double = 10
-    @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
-    
-    @AppStorage("monitorGemini") private var monitorGemini: Bool = true
-    @AppStorage("monitorCodex") private var monitorCodex: Bool = true
-    @AppStorage("monitorClaude") private var monitorClaude: Bool = true
-    
+    @AppStorage("autoRefreshEnabled") private var autoRefreshEnabled = false
+    @AppStorage("refreshInterval") private var refreshInterval: Double = 120
+    @AppStorage("launchAtLogin") private var launchAtLogin = false
+
+    @AppStorage("monitorGemini") private var monitorGemini = true
+    @AppStorage("monitorCodex") private var monitorCodex = true
+    @AppStorage("monitorClaude") private var monitorClaude = true
+
     var body: some View {
         Form {
-            Section("Appearance") {
+            Section("Refresh") {
+                Toggle("Enable automatic refresh", isOn: $autoRefreshEnabled)
+
                 HStack {
-                    Text("Window Opacity")
-                    Slider(value: $windowOpacity, in: 0.70...0.95, step: 0.05)
-                    Text("\(Int(windowOpacity * 100))%")
-                        .frame(width: 40)
+                    Text("Interval")
+                    Slider(value: $refreshInterval, in: 60...600, step: 60)
+                        .disabled(!autoRefreshEnabled)
+                    Text("\(Int(refreshInterval))s")
+                        .frame(width: 48)
                 }
+
+                Text("Changes apply immediately. Hidden windows do not refresh.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            
-            Section("Refresh Intervals") {
-                HStack {
-                    Text("CLI Status")
-                    Slider(value: $cliRefreshInterval, in: 10...120, step: 10)
-                    Text("\(Int(cliRefreshInterval))s")
-                        .frame(width: 40)
-                }
-                
-                HStack {
-                    Text("MCP Status")
-                    Slider(value: $mcpRefreshInterval, in: 5...60, step: 5)
-                    Text("\(Int(mcpRefreshInterval))s")
-                        .frame(width: 40)
-                }
-            }
-            
+
             Section("Monitor") {
                 Toggle("Gemini CLI", isOn: $monitorGemini)
                 Toggle("Codex CLI", isOn: $monitorCodex)
                 Toggle("Claude Code", isOn: $monitorClaude)
             }
-            
+
+            Section("Rendering") {
+                Text("Safe mode uses an opaque, non-floating, animation-free window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("System") {
                 Toggle("Launch at Login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { newValue in
                         updateLaunchAtLogin(newValue)
                     }
             }
-            
+
             Section {
                 Button("Open Log File") {
                     LoggingService.shared.openLogFile()
                 }
-                
-                Button("Reset to Defaults") {
+
+                Button("Reset to Safe Defaults") {
                     resetToDefaults()
                 }
                 .foregroundColor(.red)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400, height: 450)
+        .frame(width: 440, height: 480)
         .navigationTitle("Settings")
     }
-    
+
     private func updateLaunchAtLogin(_ enabled: Bool) {
-        if #available(macOS 13.0, *) {
-            do {
-                if enabled {
-                    try SMAppService.mainApp.register()
-                } else {
-                    try SMAppService.mainApp.unregister()
-                }
-            } catch {
-                LoggingService.shared.log("Failed to update launch at login: \(error)")
+        guard #available(macOS 13.0, *) else { return }
+
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
             }
+        } catch {
+            LoggingService.shared.log(
+                "Failed to update launch at login: \(error.localizedDescription)",
+                level: .error
+            )
         }
     }
-    
+
     private func resetToDefaults() {
-        windowOpacity = 0.85
-        cliRefreshInterval = 30
-        mcpRefreshInterval = 10
+        autoRefreshEnabled = false
+        refreshInterval = 120
         launchAtLogin = false
         monitorGemini = true
         monitorCodex = true

@@ -6,18 +6,16 @@ struct MCPStatusView: View {
     
     var statusColor: Color {
         switch connection.status {
-        case .connected: return .green
-        case .connecting: return .yellow
-        case .disconnected: return .gray
+        case .configured: return .blue
+        case .unavailable: return .gray
         case .error: return .red
         }
     }
     
     var statusIcon: String {
         switch connection.status {
-        case .connected: return "checkmark.circle.fill"
-        case .connecting: return "arrow.triangle.2.circlepath"
-        case .disconnected: return "minus.circle"
+        case .configured: return "gearshape.circle.fill"
+        case .unavailable: return "minus.circle"
         case .error: return "exclamationmark.triangle.fill"
         }
     }

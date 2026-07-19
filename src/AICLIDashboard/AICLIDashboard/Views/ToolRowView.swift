@@ -6,10 +6,12 @@ struct ToolRowView: View {
     
     var statusColor: Color {
         switch tool.status.lowercased() {
-        case "ok": return .green
+        case "available": return .green
+        case "unsupported": return .blue
+        case "unavailable", "cancelled": return .gray
+        case "timed out": return .orange
         case "error": return .red
-        case "not installed": return .gray
-        default: return .yellow
+        default: return .secondary
         }
     }
     
@@ -31,12 +33,13 @@ struct ToolRowView: View {
                 
                 if tool.limits.isEmpty {
                     VStack(alignment: .trailing) {
-                        Text(tool.usageValue)
+                        Text(tool.status)
                             .font(.system(.callout, design: .rounded))
                             .fontWeight(.medium)
-                        Text(tool.metric)
+                        Text(tool.usageValue)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
             }
@@ -65,6 +68,10 @@ struct ToolRowView: View {
                 }
                 .padding(.leading, 12)
             }
+
+            Text("Source: \(tool.dataSource)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 6)
     }

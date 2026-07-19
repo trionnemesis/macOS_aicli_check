@@ -1,63 +1,61 @@
 import SwiftUI
 
-/// The main dashboard view with glassmorphism design and hover opacity.
+/// The single, opaque dashboard surface used by the safe rendering mode.
 struct DashboardView: View {
-    @StateObject private var viewModel = DashboardViewModel()
-    @State private var isHovering = false
-    @AppStorage("windowOpacity") private var windowOpacity: Double = 0.85
-    
-    var currentOpacity: Double {
-        isHovering ? min(windowOpacity + 0.10, 0.95) : windowOpacity
-    }
-    
+    @ObservedObject var viewModel: DashboardViewModel
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Header
             HStack {
                 Text("AI CLI Dashboard")
                     .font(.headline)
-                    .foregroundStyle(.primary)
                 Spacer()
-                if viewModel.isLoading {
-                    ProgressView()
-                        .scaleEffect(0.7)
+                Button(action: viewModel.requestRefresh) {
+                    Image(systemName: viewModel.isLoading ? "hourglass" : "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isLoading)
+                .accessibilityLabel(viewModel.isLoading ? "Refreshing" : "Refresh")
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("AI CLI Availability")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                if viewModel.toolUsages.isEmpty {
+                    Text("Waiting for a safe refresh")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else {
-                    Button(action: { Task { await viewModel.refresh() } }) {
-                        Image(systemName: "arrow.clockwise")
+                    ForEach(viewModel.toolUsages) { tool in
+                        ToolRowView(tool: tool)
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            
+
             Divider()
-            
-            // Tool Usage Section
+
             VStack(alignment: .leading, spacing: 8) {
-                Text("Tool Usage")
+                Text("Configured MCP Servers")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                
-                ForEach(viewModel.toolUsages) { tool in
-                    ToolRowView(tool: tool)
+
+                if viewModel.mcpConnections.isEmpty {
+                    Text("No supported MCP configuration found")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.mcpConnections) { connection in
+                        MCPStatusView(connection: connection)
+                    }
                 }
             }
-            
-            Divider()
-            
-            // MCP Connections Section
-            VStack(alignment: .leading, spacing: 8) {
-                Text("MCP Servers")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                
-                ForEach(viewModel.mcpConnections) { conn in
-                    MCPStatusView(connection: conn)
-                }
-            }
-            
+
             Spacer()
-            
-            // Footer with error status
+
             HStack {
                 if let error = viewModel.lastError {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -66,24 +64,28 @@ struct DashboardView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                } else if let lastUpdated = viewModel.lastUpdated {
+                    Text("Updated: \(lastUpdated, style: .time)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 } else {
-                    Text("Updated: \(viewModel.lastUpdated, style: .time)")
+                    Text("Automatic refresh is off by default")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
             }
         }
         .padding()
-        .frame(width: 280, height: 380)
+        .frame(width: 320, height: 420)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(.ultraThinMaterial.opacity(currentOpacity))
-                .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 5)
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .windowBackgroundColor))
         )
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isHovering = hovering
-            }
+        .onAppear {
+            viewModel.setWindowVisible(true)
+        }
+        .onDisappear {
+            viewModel.setWindowVisible(false)
         }
     }
 }
